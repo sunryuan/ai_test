@@ -110,23 +110,18 @@ for epoch in range(epochs):
         print(f"Epoch: {epoch + 1}, Loss: {loss_sum / len(skipgram_data)}")  
         loss_values.append(loss_sum / len(skipgram_data))
 
-# Plot training loss curve
-plt.plot(range(1, epochs // 100 + 1), loss_values)  # Plot loss values
-plt.title('Training Loss Curve')  # Set title
-plt.xlabel('Epochs')  # Set x-axis label
-plt.ylabel('Loss')  # Set y-axis label
-plt.show()  # Display plot
-
 # Output Skip-Gram learned word embeddings
 print("Skip-Gram Word Embeddings:")
+word_embeddings = skipgram_model.input_to_hidden.weight.detach()
 for word, idx in word_to_idx.items():
-    print(f"{word}: {skipgram_model.input_to_hidden.weight[:, idx].detach().numpy()}")
+    print(f"{word}: {word_embeddings[idx].tolist()}") 
+
 
 fig, ax = plt.subplots()
 for word, idx in word_to_idx.items():
-    vec = skipgram_model.input_to_hidden.weight[:, idx].detach().numpy()
-    ax.scatter(vec[0], vec[1])
-    ax.annotate(word, (vec[0], vec[1]), fontsize=12)
+    vec = word_embeddings[idx]
+    ax.scatter(vec[0].item(), vec[1].item())
+    ax.annotate(word, (vec[0].item(), vec[1].item()), fontsize=12)
 
 plt.title('2D Word Embeddings')
 plt.xlabel('Vector Dimension 1')
