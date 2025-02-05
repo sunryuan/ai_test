@@ -117,3 +117,19 @@ plt.xlabel('Epochs')  # Set x-axis label
 plt.ylabel('Loss')  # Set y-axis label
 plt.show()  # Display plot
 
+# Output Skip-Gram learned word embeddings
+print("Skip-Gram Word Embeddings:")
+for word, idx in word_to_idx.items():
+    print(f"{word}: {skipgram_model.input_to_hidden.weight[:, idx].detach().numpy()}")
+
+fig, ax = plt.subplots()
+for word, idx in word_to_idx.items():
+    vec = skipgram_model.input_to_hidden.weight[:, idx].detach().numpy()
+    ax.scatter(vec[0], vec[1])
+    ax.annotate(word, (vec[0], vec[1]), fontsize=12)
+
+plt.title('2D Word Embeddings')
+plt.xlabel('Vector Dimension 1')
+plt.ylabel('Vector Dimension 2')
+plt.show()
+
