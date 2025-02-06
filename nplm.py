@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 # Construct a very simple dataset
-sentences = ["I like toys", "I love dad", "I hate getting-hit"]
+sentences = ["I like toys", "I love dad", "I hate getting-hit", "I believe mom"]
 
 # Join all sentences together, separate into words with spaces, and remove duplicates to build the vocabulary
 word_list = list(set(" ".join(sentences).split()))
@@ -13,6 +13,7 @@ word_to_idx = {word: idx for idx, word in enumerate(word_list)}
 # Create a dictionary that maps each index to the corresponding word
 idx_to_word = {idx: word for idx, word in enumerate(word_list)}
 voc_size = len(word_list)  # Calculate the size of the vocabulary
+print('Vocabulary:', idx_to_word) 
 print('Vocabulary:', word_to_idx)  # Print the word to index mapping dictionary
 print('Vocabulary size:', voc_size)  # Print the vocabulary size
 
@@ -20,7 +21,7 @@ print('Vocabulary size:', voc_size)  # Print the vocabulary size
 n_step = 2  # Number of time steps (context length)
 n_hidden = 2  # Hidden layer size
 embedding_size = 2  # Embedding vector size
-batch_size = 2  # Batch size
+batch_size = 3  # Batch size
 
 # Construct batch data
 def make_batch():
@@ -98,14 +99,19 @@ for epoch in range(5000):  # Set the number of training iterations
     optimizer.step()  # Update model parameters
 
 # Make predictions
-input_strs = [["I", "hate"], ["I", "like"]]  # Input sequences to predict
+input_strs = [["I", "hate"], ["I", "like"], ["I", "love"], ["I", "believe"]]  # Input sequences to predict
 # Convert input sequences to corresponding indices
 input_indices = [[word_to_idx[word] for word in seq] for seq in input_strs]
 input_batch = torch.LongTensor(input_indices)  # Convert input sequence indices to tensor
 
 # Predict for input sequences, take the category with the highest probability in the output
-predict = model(input_batch).data.max(1)[1]
+predict_all = model(input_batch).data
+predict = predict_all.max(1)[1]
 # Convert prediction result indices to corresponding words
+print(predict_all)
+print(predict.squeeze())
+
 predict_strs = [idx_to_word[n.item()] for n in predict.squeeze()]
+print(predict_strs)
 for input_seq, pred in zip(input_strs, predict_strs):
     print(input_seq, '->', pred)  # Print input sequences and prediction results
