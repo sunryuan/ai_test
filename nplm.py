@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 # Construct a very simple dataset
-sentences = ["I like toys", "I love dad", "I hate getting hit"]
+sentences = ["I like toys", "I love dad", "I hate getting-hit"]
 
 # Join all sentences together, separate into words with spaces, and remove duplicates to build the vocabulary
 word_list = list(set(" ".join(sentences).split()))
