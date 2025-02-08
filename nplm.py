@@ -19,7 +19,7 @@ print('Vocabulary size:', voc_size)  # Print the vocabulary size
 
 # Model hyperparameters
 n_step = 2  # Number of time steps (context length)
-n_hidden = 2  # Hidden layer size
+n_hidden = 4  # Hidden layer size
 embedding_size = 2  # Embedding vector size
 batch_size = 3  # Batch size
 
@@ -76,7 +76,7 @@ class NPLM(nn.Module):
         X = self.C(X)  # Pass X through the word embedding layer, shape becomes [batch_size, n_step, embedding_size]
         X = X.view(X.shape[0], -1)  # Reshape to [batch_size, n_step * embedding_size]
         # Pass through the first linear layer and apply the tanh function
-        hidden = torch.tanh(self.linear1(X))  # hidden tensor shape is [batch_size, n_hidden]
+        hidden = torch.relu(self.linear1(X))  # hidden tensor shape is [batch_size, n_hidden]
         # Pass through the second linear layer to get the output
         output = self.linear2(hidden)  # output shape is [batch_size, voc_size]
         return output  # Return the output result
@@ -115,3 +115,5 @@ predict_strs = [idx_to_word[n.item()] for n in predict.squeeze()]
 print(predict_strs)
 for input_seq, pred in zip(input_strs, predict_strs):
     print(input_seq, '->', pred)  # Print input sequences and prediction results
+
+
