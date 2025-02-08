@@ -81,7 +81,20 @@ class NPLM(nn.Module):
         output = self.linear2(hidden)  # output shape is [batch_size, voc_size]
         return output  # Return the output result
 
-model = NPLM()  # Create an instance of the Neural Probability Language Model
+
+class NPLM2(nn.Module):
+    def __init__(self):
+        super(NPLM2, self).__init__()
+        self.C = nn.Embedding(voc_size, embedding_size)
+        self.lstm = nn.LSTM(embedding_size, n_hidden, batch_first=True)  # use lstm
+        self.linear = nn.Linear(n_hidden, voc_size) 
+    def forward(self, X):  # 定义前向传播过程
+        X = self.C(X)  # Pass X through the word embedding layer, shape becomes [batch_size, n_step, embedding_size]
+        lstm_out, _ = self.lstm(X) # lstm_out has shape [batch_size, n_step, n_hidden]
+        output = self.linear(lstm_out[:, -1, :]) # output has shape [batch_size, voc_size]
+        return output
+
+model = NPLM2()  # Create an instance of the Neural Probability Language Model
 print('NPLM model structure:', model)  # Print the model structure
 
 criterion = nn.CrossEntropyLoss()  # Define the loss function as cross-entropy loss
@@ -109,7 +122,6 @@ predict_all = model(input_batch).data
 predict = predict_all.max(1)[1]
 # Convert prediction result indices to corresponding words
 print(predict_all)
-print(predict.squeeze())
 
 predict_strs = [idx_to_word[n.item()] for n in predict.squeeze()]
 print(predict_strs)
