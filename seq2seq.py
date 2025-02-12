@@ -1,10 +1,17 @@
 # Build a corpus where each line contains three sentences: Chinese, English (decoder input), and the target English translation
+# sentences = [
+#     ['咖哥 喜欢 小冰', '咖哥 喜欢 小冰', 'KaGe likes XiaoBing <eos>'],
+#     ['我 爱 学习 人工智能', '我 爱 学习 人工智能', 'I love studying AI <eos>'],
+#     ['深度学习 改变 世界', '深度学习 改变 世界', 'DL changed the world <eos>'],
+#     ['自然 语言 处理 很 强大', '自然 语言 处理 很 强大', 'NLP is so powerful <eos>'],
+#     ['神经网络 非常 复杂', '神经网络 非常 复杂', 'Neural-Nets are complex <eos>']
+# ]
 sentences = [
-    ['咖哥 喜欢 小冰', '<sos> KaGe likes XiaoBing', 'KaGe likes XiaoBing <eos>'],
-    ['我 爱 学习 人工智能', '<sos> I love studying AI', 'I love studying AI <eos>'],
-    ['深度学习 改变 世界', '<sos> DL changed the world', 'DL changed the world <eos>'],
-    ['自然 语言 处理 很 强大', '<sos> NLP is so powerful', 'NLP is so powerful <eos>'],
-    ['神经网络 非常 复杂', '<sos> Neural-Nets are complex', 'Neural-Nets are complex <eos>']
+    ['咖哥 喜欢 小冰', '<sos> <eos> <eos> <eos>', 'KaGe likes XiaoBing <eos>'],
+    ['我 爱 学习 人工智能', '<sos> <eos> <eos> <eos> <eos>', 'I love studying AI <eos>'],
+    ['深度学习 改变 世界', '<sos> <eos> <eos> <eos> <eos>', 'DL changed the world <eos>'],
+    ['自然 语言 处理 很 强大', '<sos> <eos> <eos> <eos> <eos>', 'NLP is so powerful <eos>'],
+    ['神经网络 非常 复杂', '<sos> <eos> <eos> <eos> <eos>', 'Neural-Nets are very complex <eos>']
 ]
 word_list_cn, word_list_en = [], []  # Initialize Chinese and English vocabularies
 # Traverse each sentence and add words to the vocabulary
@@ -135,16 +142,25 @@ def test_seq2seq(model, source_sentence):
     # Convert the input sentence to indices
     encoder_input = np.array([[word2idx_cn[n] for n in source_sentence.split()]])
     # Build the indices for the decoder input, starting with '<sos>' and followed by '<eos>' repeated for the length of the encoder input minus one
-    decoder_input = np.array([word2idx_en['<sos>']] + [word2idx_en['<eos>']] * (len(encoder_input[0]) - 1))
+    decoder_input = np.array([word2idx_en['<sos>']] + [word2idx_en['<eos>']] * 5) #['<sos>','<eos>','<eos>','<eos>','<eos>']
+
     # Convert to LongTensor type
     encoder_input = torch.LongTensor(encoder_input)
     decoder_input = torch.LongTensor(decoder_input).unsqueeze(0)  # Add an extra dimension
+    # print(encoder_input)
+    # print(decoder_input)
     hidden = torch.zeros(1, encoder_input.size(0), n_hidden)  # Initialize the hidden state
     predict = model(encoder_input, hidden, decoder_input)  # Get the model output
+    # print(predict)
     predict = predict.data.max(2, keepdim=True)[1]  # Get the index with the highest probability
     # Print the input sentence and the predicted sentence
+
+    # print(predict)
     print(source_sentence, '->', [idx2word_en[n.item()] for n in predict.squeeze()])
 
 # Test the model
-test_seq2seq(model, '咖哥 喜欢 小冰')  # Test with the sentence "KaGe likes XiaoBing"
+test_seq2seq(model, '我 爱 学习 人工智能')  # Test with the sentence "KaGe likes XiaoBing"
 test_seq2seq(model, '自然 语言 处理 很 强大')  # Test with the sentence "NLP is so powerful"
+test_seq2seq(model, '深度学习 改变 世界') 
+test_seq2seq(model, '咖哥 喜欢 小冰')  
+test_seq2seq(model, '神经网络 非常 复杂')   
