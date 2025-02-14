@@ -1,9 +1,10 @@
 # Build a corpus where each line contains three sentences: Chinese, English (decoder input), and the target English translation
-
+import torch.nn as nn  # Import torch.nn library
 import numpy as np  # Import numpy
 import torch  # Import torch
 import random  # Import random library
-import torch.nn as nn  # Import torch.nn library
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 sentences = [
     ['咖哥 喜欢 小冰', '<sos> KaGe likes XiaoBing', 'KaGe likes XiaoBing <eos>'],
@@ -43,6 +44,7 @@ print("Size of English vocabulary:", voc_size_en)  # Print the size of the Engli
 print("Chinese word-to-index dictionary:", word2idx_cn)  # Print the Chinese word-to-index dictionary
 print("English word-to-index dictionary:", word2idx_en)  # Print the English word-to-index dictionary
 
+
 # Define a function to randomly select a sentence and generate input, output, and target data from the vocabulary
 def make_data(sentences):
     # Randomly select a sentence for training
@@ -72,6 +74,18 @@ print("Encoder input tensor:", encoder_input)  # Print the input tensor
 print("Decoder input tensor:", decoder_input)  # Print the output tensor
 print("Target tensor:", target)  # Print the target tensor
 
+
+# Define the Attention class
+class Attention(nn.Module):
+    def __init__(self):
+        super(Attention, self).__init__()
+
+    def forward(self, decoder_context, encoder_context):
+        scores = torch.matmul(decoder_context,encoder_context.transpose(-2,-1))
+        attn_weights = nn.functional.softmax(scores, dim=-1)
+        context = torch.matmul(attn_weights, encoder_context)
+        return context, attn_weights
+
 # Define the Encoder class, inheriting from nn.Module
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -83,6 +97,7 @@ class Encoder(nn.Module):
         embedded = self.embedding(inputs)  # Convert inputs to embedding vectors
         output, hidden = self.rnn(embedded, hidden)  # Input embedding vectors into the RNN layer and get the output
         return output, hidden
+
 # Define the Decoder class, inheriting from nn.Module
 class Decoder(nn.Module):
     def __init__(self, hidden_size, output_size):
@@ -96,13 +111,34 @@ class Decoder(nn.Module):
         output, hidden = self.rnn(embedded, hidden)  # Input embedding vectors into the RNN layer and get the output
         output = self.out(output)  # Use the linear layer to generate the final output
         return output, hidden
+
+# Define the docoder class
+class DecoderWithAttention(nn.Module):
+    def __init__(self, hidden_size, output_size):
+        super(DecoderWithAttention, self).__init__()
+        self.hidden_size = hidden_size
+        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.rnn = nn.RNN(hidden_size, hidden_size, batch_first=True)
+        self.attention = Attention()
+        self.out = nn.Linear(2 * hidden_size, output_size)
+    def forward(self, dec_input, hidden, enc_output):
+        embedded = self.embedding(dec_input)
+        rnn_output, hidden = self.rnn(embedded, hidden)
+        context, attn_weights = self.attention(rnn_output, enc_output)
+        dec_output = torch.cat((rnn_output, context), dim=-1)
+        dec_output = self.out(dec_output)
+        return dec_output, hidden, attn_weights
+
 n_hidden = 128  # Set the number of hidden layers
 # Create the encoder and decoder
 encoder = Encoder(voc_size_cn, n_hidden)
-decoder = Decoder(n_hidden, voc_size_en)
+# decoder = Decoder(n_hidden, voc_size_en)
+decoder = DecoderWithAttention(n_hidden, voc_size_en)
+
 print('Encoder structure:', encoder)  # Print the encoder structure
 print('Decoder structure:', decoder)  # Print the decoder structure
 
+# Create the Seq2Seq architecture
 class Seq2Seq(nn.Module):
     def __init__(self, encoder, decoder):
         super(Seq2Seq, self).__init__()
@@ -117,8 +153,19 @@ class Seq2Seq(nn.Module):
         # Pass the decoder input (target sequence) through the decoder and get the output
         decoder_output, _ = self.decoder(dec_input, decoder_hidden)
         return decoder_output
-# Create the Seq2Seq architecture
-model = Seq2Seq(encoder, decoder)
+
+class Seq2SeqWithAttention(nn.Module):
+    def __init__(self, encoder, decoder):
+        super(Seq2SeqWithAttention, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder    
+    def forward(self, encoder_input, hidden, decoder_input): 
+        encoder_output, encoder_hidden = self.encoder(encoder_input, hidden)
+        decoder_hidden = encoder_hidden
+        decoder_output, _, attn_weights = self.decoder(decoder_input, decoder_hidden, encoder_output) 
+        return decoder_output, attn_weights
+
+model = Seq2SeqWithAttention(encoder, decoder)
 print('S2S model structure:', model)  # Print the model structure
 
 # Define the training function
@@ -127,7 +174,7 @@ def train_seq2seq(model, criterion, optimizer, epochs):
         encoder_input, decoder_input, target = make_data(sentences)  # Create training data
         hidden = torch.zeros(1, encoder_input.size(0), n_hidden)  # Initialize the hidden state
         optimizer.zero_grad()  # Clear gradients
-        output = model(encoder_input, hidden, decoder_input)  # Get the model output
+        output,_ = model(encoder_input, hidden, decoder_input)  # Get the model output
         loss = criterion(output.view(-1, voc_size_en), target.view(-1))  # Calculate the loss
         if (epoch + 1) % 40 == 0:  # Print the loss
             print(f"Epoch: {epoch + 1:04d} cost = {loss:.6f}")
@@ -138,6 +185,20 @@ epochs = 400  # Number of training epochs
 criterion = nn.CrossEntropyLoss()  # Loss function
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  # Optimizer
 train_seq2seq(model, criterion, optimizer, epochs)  # Call the function to train the model
+
+
+
+plt.rcParams["font.family"]=['Songti SC']
+plt.rcParams['font.sans-serif']=['Songti SC'] 
+plt.rcParams['axes.unicode_minus']=False 
+def visualize_attention(source_sentence, predicted_sentence, attn_weights):    
+    plt.figure(figsize=(10, 10))
+    ax = sns.heatmap(attn_weights, annot=True, cbar=False, 
+                     xticklabels=source_sentence.split(), 
+                     yticklabels=predicted_sentence, cmap="Greens") 
+    plt.xlabel("源序列") 
+    plt.ylabel("目标序列")
+    plt.show() 
 
 # Define the test function for the sequence-to-sequence model
 def test_seq2seq(model, source_sentence):
@@ -152,7 +213,7 @@ def test_seq2seq(model, source_sentence):
     # print(encoder_input)
     # print(decoder_input)
     hidden = torch.zeros(1, encoder_input.size(0), n_hidden)  # Initialize the hidden state
-    predict = model(encoder_input, hidden, decoder_input)  # Get the model output
+    predict,attn_weights = model(encoder_input, hidden, decoder_input)  # Get the model output
     # print(predict)
     predict = predict.data.max(2, keepdim=True)[1]  # Get the index with the highest probability
     # Print the input sentence and the predicted sentence
@@ -160,9 +221,13 @@ def test_seq2seq(model, source_sentence):
     # print(predict)
     print(source_sentence, '->', [idx2word_en[n.item()] for n in predict.squeeze()])
 
+    attn_weights = attn_weights.squeeze(0).cpu().detach().numpy()
+    print(attn_weights)
+    visualize_attention(source_sentence, [idx2word_en[n.item()] for n in predict.squeeze()], attn_weights)
+
 # Test the model
-test_seq2seq(model, '我 爱 学习 人工智能')  # Test with the sentence "KaGe likes XiaoBing"
-test_seq2seq(model, '自然 语言 处理 很 强大')  # Test with the sentence "NLP is so powerful"
-test_seq2seq(model, '深度学习 改变 世界') 
+# test_seq2seq(model, '我 爱 学习 人工智能')  # Test with the sentence "KaGe likes XiaoBing"
+# test_seq2seq(model, '自然 语言 处理 很 强大')  # Test with the sentence "NLP is so powerful"
+# test_seq2seq(model, '深度学习 改变 世界') 
 test_seq2seq(model, '咖哥 喜欢 小冰')  
-test_seq2seq(model, '神经网络 非常 复杂')   
+# test_seq2seq(model, '神经网络 非常 复杂')   
