@@ -118,8 +118,8 @@ def get_sin_enc_table(n_position, embedding_dim):
             angle = pos_i / np.power(10000, 2 * (hid_j // 2) / embedding_dim)
             sinusoid_table[pos_i, hid_j] = angle    
     # Calculate sine and cosine values
-    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i 偶数维
-    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1 奇数维
+    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
+    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
     #-------------------------dim--------------------------------
     # sinusoid_table shape: [n_position, embedding_dim]
     #----------------------------------------------------------------   
@@ -144,5 +144,31 @@ def get_attn_pad_mask(seq_q, seq_k):
     # pad_attn_mask dim [batch_size,len_q,len_k]
     #-----------------------------------------------------------------
     return pad_attn_mask 
+
+# Define Encoder Layer
+class EncoderLayer(nn.Module):
+    def __init__(self):
+        super(EncoderLayer, self).__init__()        
+        self.enc_self_attn = MultiHeadAttention()  # Multi-head self-attention layer       
+        self.pos_ffn = PoswiseFeedForwardNet()     # Position-wise feed-forward network
+
+    def forward(self, enc_inputs, enc_self_attn_mask):
+        #-------------------------dim--------------------------------
+        # enc_inputs dim: [batch_size, seq_len, embedding_dim]
+        # enc_self_attn_mask dim: [batch_size, seq_len, seq_len]
+        #-----------------------------------------------------------------
+        # Input the same Q, K, V into the multi-head self-attention layer, 
+        # and the returned attn_weights will have an additional head dimension.
+        enc_outputs, attn_weights = self.enc_self_attn(enc_inputs, enc_inputs,
+                                               enc_inputs, enc_self_attn_mask)
+        #-------------------------dim--------------------------------
+        # enc_outputs dim: [batch_size, seq_len, embedding_dim] 
+        # attn_weights dim: [batch_size, n_heads, seq_len, seq_len]      
+        # Input the outputs of the multi-head self-attention into the position-wise feed-forward network layer
+        enc_outputs = self.pos_ffn(enc_outputs)  # The dimension is the same as enc_inputs
+        #-------------------------dim--------------------------------
+        # enc_outputs dim: [batch_size, seq_len, embedding_dim] 
+        #-----------------------------------------------------------------
+        return enc_outputs, attn_weights  # Return the encoder outputs and attention weights of each encoder layer
 
 
