@@ -413,25 +413,65 @@ corpus = TranslationCorpus(sentences)
 
 model = Transformer(corpus) # 创建模型实例
 criterion = nn.CrossEntropyLoss() # 损失函数
-optimizer = optim.Adam(model.parameters(), lr=0.00001) # 优化器
-epochs = 1000 # 训练轮次
-for epoch in range(epochs): # 训练100轮
-    optimizer.zero_grad() # 梯度清零
-    enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size) # 创建训练数据
-    outputs, _, _, _ = model(enc_inputs, dec_inputs) # 获取模型输出 
-    loss = criterion(outputs.view(-1, len(corpus.tgt_vocab)), target_batch.view(-1)) # 计算损失
-    if (epoch + 1) % 20 == 0: # 打印损失
-        print(f"Epoch: {epoch + 1:04d} cost = {loss:.6f}")
-    loss.backward()# 反向传播        
-    optimizer.step()# 更新参数
+optimizer = optim.Adam(model.parameters(), lr=0.0001) # 优化器
+# epochs = 100 # 训练轮次
+# for epoch in range(epochs): # 训练100轮
+#     optimizer.zero_grad() # 梯度清零
+#     enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size) # 创建训练数据
+#     outputs, _, _, _ = model(enc_inputs, dec_inputs) # 获取模型输出 
+#     loss = criterion(outputs.view(-1, len(corpus.tgt_vocab)), target_batch.view(-1)) # 计算损失
+#     if (epoch + 1) % 20 == 0: # 打印损失
+#         print(f"Epoch: {epoch + 1:04d} cost = {loss:.6f}")
+#     loss.backward()# 反向传播        
+#     optimizer.step()# 更新参数
+
+# torch.save(model, 'model.pth')
+model = torch.load('model.pth')
+
+# 定义贪婪解码器函数
+def greedy_decoder(model, enc_input, start_symbol):
+    # 对输入数据进行编码，并获得编码器输出及自注意力权重
+    enc_outputs, enc_self_attns = model.encoder(enc_input)    
+    # 初始化解码器输入为全零张量，大小为 (1, 5)，数据类型与 enc_input 一致
+    dec_input = torch.zeros(1, 5).type_as(enc_input.data)    
+    # 设置下一个要解码的符号为开始符号
+    next_symbol = start_symbol    
+    # 循环5次，为解码器输入中的每一个位置填充一个符号
+    for i in range(0, 5):
+        # 将下一个符号放入解码器输入的当前位置
+        dec_input[0][i] = next_symbol        
+        # 运行解码器，获得解码器输出、解码器自注意力权重和编码器-解码器注意力权重
+        dec_output, _, _ = model.decoder(dec_input, enc_input, enc_outputs)
+        # 将解码器输出投影到目标词汇空间
+        projected = model.projection(dec_output)        
+        # 找到具有最高概率的下一个单词
+        prob = projected.squeeze(0).max(dim=-1, keepdim=False)[1]
+        next_word = prob.data[i]        
+        # 将找到的下一个单词作为新的符号
+        next_symbol = next_word.item()  
+    # 返回解码器输入，它包含了生成的符号序列
+    dec_outputs = dec_input
+    return dec_outputs
+
+# enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size=1,test_batch=True) 
+# predict, enc_self_attns, dec_self_attns, dec_enc_attns = model(enc_inputs, dec_inputs) # 用模型进行翻译
+# predict = predict.view(-1, len(corpus.tgt_vocab)) # 将预测结果维度重塑
+# predict = predict.data.max(1, keepdim=True)[1] # 找到每个位置概率最大的单词的索引
+# # 解码预测的输出，将所预测的目标句子中的索引转换为单词
+# translated_sentence = [corpus.tgt_idx2word[idx.item()] for idx in predict.squeeze()]
+# # 将输入的源语言句子中的索引转换为单词
+# input_sentence = ' '.join([corpus.src_idx2word[idx.item()] for idx in enc_inputs[0]])
+# print(input_sentence, '->', translated_sentence) # 打印原始句子和翻译后的句子
 
 
-enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size=1,test_batch=True) 
-predict, enc_self_attns, dec_self_attns, dec_enc_attns = model(enc_inputs, dec_inputs) # 用模型进行翻译
-predict = predict.view(-1, len(corpus.tgt_vocab)) # 将预测结果维度重塑
-predict = predict.data.max(1, keepdim=True)[1] # 找到每个位置概率最大的单词的索引
-# 解码预测的输出，将所预测的目标句子中的索引转换为单词
-translated_sentence = [corpus.tgt_idx2word[idx.item()] for idx in predict.squeeze()]
-# 将输入的源语言句子中的索引转换为单词
-input_sentence = ' '.join([corpus.src_idx2word[idx.item()] for idx in enc_inputs[0]])
-print(input_sentence, '->', translated_sentence) # 打印原始句子和翻译后的句子
+epochs = 1 
+for epoch in range(epochs):
+    # 用贪婪解码器生成翻译文本
+    enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size=1, test_batch=True) 
+    # 使用贪婪解码器生成解码器输出
+    greedy_dec_input = greedy_decoder(model, enc_inputs, start_symbol=corpus.tgt_vocab['<sos>'])
+    # 将解码器输入转换为单词序列
+    greedy_dec_output_words = [corpus.tgt_idx2word[n.item()] for n in greedy_dec_input.squeeze()]
+    # 打印编码器输入和贪婪解码器生成的文本
+    enc_inputs_words = [corpus.src_idx2word[code.item()] for code in enc_inputs[0]]
+    print(enc_inputs_words, '->', greedy_dec_output_words)
