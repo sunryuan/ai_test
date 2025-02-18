@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim as optim
 d_k = 64
 d_v = 64 
 
@@ -171,4 +172,266 @@ class EncoderLayer(nn.Module):
         #-----------------------------------------------------------------
         return enc_outputs, attn_weights  # Return the encoder outputs and attention weights of each encoder layer
 
+n_layers = 6  # encoder layer number
+class Encoder(nn.Module):
+    def __init__(self, corpus):
+        super(Encoder, self).__init__()        
+        self.src_emb = nn.Embedding(len(corpus.src_vocab), d_embedding) # embedding layer
+        self.pos_emb = nn.Embedding.from_pretrained( \
+          get_sin_enc_table(corpus.src_len+1, d_embedding), freeze=True) # position embedding layer
+        self.layers = nn.ModuleList(EncoderLayer() for _ in range(n_layers))# encoder layers
 
+    def forward(self, enc_inputs):  
+        #-------------------------dim--------------------------------
+        # enc_inputs dim: [batch_size, source_len]
+        #-----------------------------------------------------------------
+        # Create position index sequence from 1 to source_len
+        pos_indices = torch.arange(1, enc_inputs.size(1) + 1).unsqueeze(0).to(enc_inputs)
+        #-------------------------dim--------------------------------
+        # pos_indices dim: [1, source_len]
+        #-----------------------------------------------------------------
+        # add word embedding and pos embedding to input [batch_size, source_len, embedding_dim]
+        enc_outputs = self.src_emb(enc_inputs) + self.pos_emb(pos_indices)
+        #-------------------------dim--------------------------------
+        # enc_outputs dim: [batch_size, seq_len, embedding_dim]
+        #-----------------------------------------------------------------
+        # generate self attention padding mask
+        enc_self_attn_mask = get_attn_pad_mask(enc_inputs, enc_inputs) 
+        #-------------------------dim--------------------------------
+        # enc_self_attn_mask dim: [batch_size, len_q, len_k]        
+        #-----------------------------------------------------------------
+        enc_self_attn_weights = [] # init enc_self_attn_weights
+        # through encoding layer [batch_size, seq_len, embedding_dim]
+        for layer in self.layers: 
+            enc_outputs, enc_self_attn_weight = layer(enc_outputs, enc_self_attn_mask)
+            enc_self_attn_weights.append(enc_self_attn_weight)
+        #-------------------------dim--------------------------------
+        # enc_outputs dim: [batch_size, seq_len, embedding_dim] dim is the same as enc_inputs
+        # enc_self_attn_weights is a list，each element dim:[batch_size, n_heads, seq_len, seq_len]          
+        #-----------------------------------------------------------------
+        return enc_outputs, enc_self_attn_weights # return encoder output and attention weights
+
+# A function that generates subsequent attention mask to ignore future information in multi-head self-attention calcluations
+def get_attn_subsequent_mask(seq):
+    #-------------------------dim--------------------------------
+    # seq dim: [batch_size, seq_len(Q)=seq_len(K)]
+    #-----------------------------------------------------------------
+    # get the shape of input
+    attn_shape = [seq.size(0), seq.size(1), seq.size(1)]  
+    #-------------------------dim--------------------------------
+    # attn_shape is a one dim tensor [batch_size, seq_len(Q), seq_len(K)]
+    #-----------------------------------------------------------------
+    # Creating an upper triangular matrix using numpy(triu = triangle upper)
+    subsequent_mask = np.triu(np.ones(attn_shape), k=1)
+    #-------------------------dim--------------------------------
+    # subsequent_mask dim: [batch_size, seq_len(Q), seq_len(K)]
+    #-----------------------------------------------------------------
+    # Convert numpy array to PyTorch tensor and set data type to byte (boolean)
+    subsequent_mask = torch.from_numpy(subsequent_mask).byte()
+    #-------------------------dim--------------------------------
+    # Returned subsequent_mask dim: [batch_size, seq_len(Q), seq_len(K)]
+    #-----------------------------------------------------------------
+    return subsequent_mask
+
+class DecoderLayer(nn.Module):
+    def __init__(self):
+        super(DecoderLayer, self).__init__()        
+        self.dec_self_attn = MultiHeadAttention() # multi-head self-attention layer     
+        self.dec_enc_attn = MultiHeadAttention()  # multi-head self-attention layer, connect encoder and decoder       
+        self.pos_ffn = PoswiseFeedForwardNet() # position wise feed forward network
+
+    def forward(self, dec_inputs, enc_outputs, dec_self_attn_mask, dec_enc_attn_mask):
+        #-------------------------dim--------------------------------
+        # dec_inputs dim: [batch_size, target_len, embedding_dim]
+        # enc_outputs dim: [batch_size, source_len, embedding_dim]
+        # dec_self_attn_mask dim: [batch_size, target_len, target_len]
+        # dec_enc_attn_mask dim: [batch_size, target_len, source_len]
+        #-----------------------------------------------------------------      
+        # Input the same Q, K, V into the multi-head self-attention layer
+        # use the same Q,K,V as input
+        dec_outputs, dec_self_attn = self.dec_self_attn(dec_inputs, dec_inputs, 
+                                                        dec_inputs, dec_self_attn_mask)
+        #-------------------------dim--------------------------------
+        # dec_outputs dim: [batch_size, target_len, embedding_dim]
+        # dec_self_attn dim: [batch_size, n_heads, target_len, target_len]
+        #-----------------------------------------------------------------        
+        # Feed the decoder output and encoder output into the multi-head self-attention layer
+        dec_outputs, dec_enc_attn = self.dec_enc_attn(dec_outputs, enc_outputs, 
+                                                      enc_outputs, dec_enc_attn_mask)
+        #-------------------------dim--------------------------------
+        # dec_outputs dim: [batch_size, target_len, embedding_dim]
+        # dec_enc_attn dim: [batch_size, n_heads, target_len, source_len]
+        #-----------------------------------------------------------------
+        # Input position-wise feed-forward network layer
+        dec_outputs = self.pos_ffn(dec_outputs)
+        #-------------------------dim--------------------------------
+        # dec_outputs dim: [batch_size, target_len, embedding_dim]
+        # dec_self_attn dim: [batch_size, n_heads, target_len, target_len]
+        # dec_enc_attn dim: [batch_size, n_heads, target_len, source_len]   
+        #-----------------------------------------------------------------
+        # Returns the decoder layer output, self-attention and decoder-encoder attention weights for each layer
+        return dec_outputs, dec_self_attn, dec_enc_attn
+
+n_layers = 6  # Set Decoder layer number
+class Decoder(nn.Module):
+    def __init__(self, corpus):
+        super(Decoder, self).__init__()
+        self.tgt_emb = nn.Embedding(len(corpus.tgt_vocab), d_embedding) # word embedding layer
+        self.pos_emb = nn.Embedding.from_pretrained( \
+           get_sin_enc_table(corpus.tgt_len+1, d_embedding), freeze=True) # position embedding layer       
+        self.layers = nn.ModuleList([DecoderLayer() for _ in range(n_layers)]) # Stacking multiple decoding layers
+
+    def forward(self, dec_inputs, enc_inputs, enc_outputs): 
+        #-------------------------dim--------------------------------
+        # dec_inputs dim: [batch_size, target_len]
+        # enc_inputs dim: [batch_size, source_len]
+        # enc_outputs dim: [batch_size, source_len, embedding_dim]
+        #-----------------------------------------------------------------   
+        pos_indices = torch.arange(1, dec_inputs.size(1) + 1).unsqueeze(0).to(dec_inputs)
+        #-------------------------dim--------------------------------
+        # pos_indices dim: [1, target_len]
+        #-----------------------------------------------------------------
+        dec_outputs = self.tgt_emb(dec_inputs) + self.pos_emb(pos_indices)
+        #-------------------------dim--------------------------------
+        # dec_outputs dim: [batch_size, target_len, embedding_dim]
+        #-----------------------------------------------------------------
+        dec_self_attn_pad_mask = get_attn_pad_mask(dec_inputs, dec_inputs) # padding mask
+        dec_self_attn_subsequent_mask = get_attn_subsequent_mask(dec_inputs) # Subsequent Mask
+        dec_self_attn_mask = torch.gt((dec_self_attn_pad_mask \
+                                       + dec_self_attn_subsequent_mask), 0) 
+        dec_enc_attn_mask = get_attn_pad_mask(dec_inputs, enc_inputs) # decoder-encoder mask
+        #-------------------------dim--------------------------------        
+        # dec_self_attn_pad_mask dim: [batch_size, target_len, target_len]
+        # dec_self_attn_subsequent_mask dim: [batch_size, target_len, target_len]
+        # dec_self_attn_mask dim: [batch_size, target_len, target_len]
+        # dec_enc_attn_mask dim: [batch_size, target_len, source_len]
+         #-----------------------------------------------------------------       
+        dec_self_attns, dec_enc_attns = [], [] # Init dec_self_attns, dec_enc_attns
+        # decoder layers [batch_size, seq_len, embedding_dim]
+        for layer in self.layers:
+            dec_outputs, dec_self_attn, dec_enc_attn = layer(dec_outputs, enc_outputs, 
+                                               dec_self_attn_mask, dec_enc_attn_mask)
+            dec_self_attns.append(dec_self_attn)
+            dec_enc_attns.append(dec_enc_attn)
+        #-------------------------dim--------------------------------
+        # dec_outputs dim: [batch_size, target_len, embedding_dim]
+        # dec_self_attns is a list，each element dim: [batch_size, n_heads, target_len, target_len]
+        # dec_enc_attns is a list，each element dim: [batch_size, n_heads, target_len, source_len]
+        #----------------------------------------------------------------- 
+              
+        return dec_outputs, dec_self_attns, dec_enc_attns
+
+class Transformer(nn.Module):
+    def __init__(self, corpus):
+        super(Transformer, self).__init__()        
+        self.encoder = Encoder(corpus) 
+        self.decoder = Decoder(corpus) 
+        # Define a linear projection layer to transform the decoder output into a probability distribution of the target vocabulary size
+        self.projection = nn.Linear(d_embedding, len(corpus.tgt_vocab), bias=False)
+    def forward(self, enc_inputs, dec_inputs):
+        #-------------------------dim--------------------------------
+        # enc_inputs dim: [batch_size, source_seq_len]
+        # dec_inputs dim: [batch_size, target_seq_len]
+        #-----------------------------------------------------------------        
+        # Call encoder   
+        enc_outputs, enc_self_attns = self.encoder(enc_inputs)
+        #-------------------------dim--------------------------------
+        # enc_outputs dim: [batch_size, source_len, embedding_dim]
+        # enc_self_attns is a list, each element dim: [batch_size, n_heads, src_seq_len, src_seq_len]        
+        #-----------------------------------------------------------------
+        # Call decoder   
+        dec_outputs, dec_self_attns, dec_enc_attns = self.decoder(dec_inputs, enc_inputs, enc_outputs)
+        #-------------------------dim--------------------------------
+        # dec_outputs dim: [batch_size, target_len, embedding_dim]
+        # dec_self_attns is a list, each element dim: [batch_size, n_heads, tgt_seq_len, tgt_seq_len]
+        # dec_enc_attns is a list, each element dim: [batch_size, n_heads, tgt_seq_len, src_seq_len]   
+        #-----------------------------------------------------------------
+        # call projection
+        dec_logits = self.projection(dec_outputs)  
+        #-------------------------dim--------------------------------
+        # dec_logits dim: [batch_size, tgt_seq_len, tgt_vocab_size]
+        #-----------------------------------------------------------------
+        return dec_logits, enc_self_attns, dec_self_attns, dec_enc_attns
+
+
+sentences = [
+    ['咖哥 喜欢 小冰', 'KaGe likes XiaoBing'],
+    ['我 爱 学习 人工智能', 'I love studying AI'],
+    ['深度学习 改变 世界', ' DL changed the world'],
+    ['自然语言处理 很 强大', 'NLP is powerful'],
+    ['神经网络 非常 复杂', 'Neural-networks are complex'] ]
+
+from collections import Counter # 导入Counter 类
+class TranslationCorpus:
+    def __init__(self, sentences):
+        self.sentences = sentences
+        # Calculate the maximum sentence length for the source and target languages, and add 1 and 2 respectively to accommodate fillers and special symbols
+        self.src_len = max(len(sentence[0].split()) for sentence in sentences) + 1
+        self.tgt_len = max(len(sentence[1].split()) for sentence in sentences) + 2
+        # 创建源语言和目标语言的词汇表
+        self.src_vocab, self.tgt_vocab = self.create_vocabularies()
+        # 创建索引到单词的映射
+        self.src_idx2word = {v: k for k, v in self.src_vocab.items()}
+        self.tgt_idx2word = {v: k for k, v in self.tgt_vocab.items()}
+    # 定义创建词汇表的函数
+    def create_vocabularies(self):
+        # 统计源语言和目标语言的单词频率
+        src_counter = Counter(word for sentence in self.sentences for word in sentence[0].split())
+        tgt_counter = Counter(word for sentence in self.sentences for word in sentence[1].split())        
+        # 创建源语言和目标语言的词汇表，并为每个单词分配一个唯一的索引
+        src_vocab = {'<pad>': 0, **{word: i+1 for i, word in enumerate(src_counter)}}
+        tgt_vocab = {'<pad>': 0, '<sos>': 1, '<eos>': 2, 
+                     **{word: i+3 for i, word in enumerate(tgt_counter)}}        
+        return src_vocab, tgt_vocab
+    # 定义创建批次数据的函数
+    def make_batch(self, batch_size, test_batch=False):
+        input_batch, output_batch, target_batch = [], [], []
+        # 随机选择句子索引
+        sentence_indices = torch.randperm(len(self.sentences))[:batch_size]
+        for index in sentence_indices:
+            src_sentence, tgt_sentence = self.sentences[index]
+            # 将源语言和目标语言的句子转换为索引序列
+            src_seq = [self.src_vocab[word] for word in src_sentence.split()]
+            tgt_seq = [self.tgt_vocab['<sos>']] + [self.tgt_vocab[word] \
+                         for word in tgt_sentence.split()] + [self.tgt_vocab['<eos>']]            
+            # 对源语言和目标语言的序列进行填充
+            src_seq += [self.src_vocab['<pad>']] * (self.src_len - len(src_seq))
+            tgt_seq += [self.tgt_vocab['<pad>']] * (self.tgt_len - len(tgt_seq))            
+            # 将处理好的序列添加到批次中
+            input_batch.append(src_seq)
+            output_batch.append([self.tgt_vocab['<sos>']] + ([self.tgt_vocab['<pad>']] * \
+                                    (self.tgt_len - 2)) if test_batch else tgt_seq[:-1])
+            target_batch.append(tgt_seq[1:])        
+          # 将批次转换为LongTensor类型
+        input_batch = torch.LongTensor(input_batch)
+        output_batch = torch.LongTensor(output_batch)
+        target_batch = torch.LongTensor(target_batch)            
+        return input_batch, output_batch, target_batch
+
+# 创建语料库类实例
+corpus = TranslationCorpus(sentences)
+
+model = Transformer(corpus) # 创建模型实例
+criterion = nn.CrossEntropyLoss() # 损失函数
+optimizer = optim.Adam(model.parameters(), lr=0.00001) # 优化器
+epochs = 1000 # 训练轮次
+for epoch in range(epochs): # 训练100轮
+    optimizer.zero_grad() # 梯度清零
+    enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size) # 创建训练数据
+    outputs, _, _, _ = model(enc_inputs, dec_inputs) # 获取模型输出 
+    loss = criterion(outputs.view(-1, len(corpus.tgt_vocab)), target_batch.view(-1)) # 计算损失
+    if (epoch + 1) % 20 == 0: # 打印损失
+        print(f"Epoch: {epoch + 1:04d} cost = {loss:.6f}")
+    loss.backward()# 反向传播        
+    optimizer.step()# 更新参数
+
+
+enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size=1,test_batch=True) 
+predict, enc_self_attns, dec_self_attns, dec_enc_attns = model(enc_inputs, dec_inputs) # 用模型进行翻译
+predict = predict.view(-1, len(corpus.tgt_vocab)) # 将预测结果维度重塑
+predict = predict.data.max(1, keepdim=True)[1] # 找到每个位置概率最大的单词的索引
+# 解码预测的输出，将所预测的目标句子中的索引转换为单词
+translated_sentence = [corpus.tgt_idx2word[idx.item()] for idx in predict.squeeze()]
+# 将输入的源语言句子中的索引转换为单词
+input_sentence = ' '.join([corpus.src_idx2word[idx.item()] for idx in enc_inputs[0]])
+print(input_sentence, '->', translated_sentence) # 打印原始句子和翻译后的句子
