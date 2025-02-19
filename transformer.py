@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import time
 d_k = 64
 d_v = 64 
 
@@ -414,18 +415,22 @@ corpus = TranslationCorpus(sentences)
 model = Transformer(corpus) # 创建模型实例
 criterion = nn.CrossEntropyLoss() # 损失函数
 optimizer = optim.Adam(model.parameters(), lr=0.0001) # 优化器
-# epochs = 100 # 训练轮次
-# for epoch in range(epochs): # 训练100轮
-#     optimizer.zero_grad() # 梯度清零
-#     enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size) # 创建训练数据
-#     outputs, _, _, _ = model(enc_inputs, dec_inputs) # 获取模型输出 
-#     loss = criterion(outputs.view(-1, len(corpus.tgt_vocab)), target_batch.view(-1)) # 计算损失
-#     if (epoch + 1) % 20 == 0: # 打印损失
-#         print(f"Epoch: {epoch + 1:04d} cost = {loss:.6f}")
-#     loss.backward()# 反向传播        
-#     optimizer.step()# 更新参数
+epochs = 100 # 训练轮次
+t0 = time.time()
 
-# torch.save(model, 'model.pth')
+for epoch in range(epochs): # 训练100轮
+    optimizer.zero_grad() # 梯度清零
+    enc_inputs, dec_inputs, target_batch = corpus.make_batch(batch_size) # 创建训练数据
+    outputs, _, _, _ = model(enc_inputs, dec_inputs) # 获取模型输出 
+    loss = criterion(outputs.view(-1, len(corpus.tgt_vocab)), target_batch.view(-1)) # 计算损失
+    if (epoch + 1) % 20 == 0: # 打印损失
+        print(f"Epoch: {epoch + 1:04d} cost = {loss:.6f}")
+    loss.backward()# 反向传播        
+    optimizer.step()# 更新参数
+
+t1 = time.time()
+print('time_cost:', t1 - t0)
+torch.save(model, 'model.pth')
 model = torch.load('model.pth')
 
 # 定义贪婪解码器函数
